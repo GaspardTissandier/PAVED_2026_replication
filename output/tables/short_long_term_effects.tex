@@ -1,0 +1,53 @@
+\begingroup
+\centering
+\begin{tabular}{lcccccc}
+   \tabularnewline \midrule \midrule
+   Dependent Variables:                                     & burglary\_r  & vehicle\_theft\_r   & burglary\_r  & vehicle\_theft\_r   & burglary\_r   & vehicle\_theft\_r\\    
+   Model:                                                   & (1)          & (2)                 & (3)          & (4)                 & (5)           & (6)\\  
+   \midrule
+   \emph{Variables}\\
+   post\_1\_31 $\times$ treat                               & 0.4650       & -0.1622$^{*}$       &              &                     &               &   \\   
+                                                            & (0.3319)     & (0.0970)            &              &                     &               &   \\   
+   post\_1\_32 $\times$ treat                               & 0.0968       & -0.1262             &              &                     &               &   \\   
+                                                            & (0.1709)     & (0.0924)            &              &                     &               &   \\   
+   post\_1\_33 $\times$ treat                               & 0.0656       & -0.1919             &              &                     &               &   \\   
+                                                            & (0.2176)     & (0.1366)            &              &                     &               &   \\   
+   post\_1\_31 $\times$ dep\_n                              &              & -0.0020             &              &                     & 0.1465        & -0.0388\\   
+                                                            &              & (0.0643)            &              &                     & (0.1242)      & (0.0595)\\   
+   post\_1\_32 $\times$ dep\_n                              &              & -0.0054             &              &                     & -0.1767$^{*}$ & -0.0349\\   
+                                                            &              & (0.0695)            &              &                     & (0.1056)      & (0.0657)\\   
+   post\_1\_33 $\times$ dep\_n                              &              & -0.0297             &              &                     & -0.0761       & -0.0970\\   
+                                                            &              & (0.0717)            &              &                     & (0.1304)      & (0.0656)\\   
+   post\_1\_31 $\times$ jurisdictiongn                      &              &                     & 0.6027       & 0.2170$^{*}$        & 0.1420        & 0.2976$^{***}$\\   
+                                                            &              &                     & (0.4069)     & (0.1176)            & (0.1087)      & (0.0524)\\   
+   post\_1\_32 $\times$ jurisdictiongn                      &              &                     & 0.3867       & 0.2048              & -0.0035       & 0.1399$^{**}$\\   
+                                                            &              &                     & (0.3267)     & (0.1355)            & (0.0957)      & (0.0632)\\   
+   post\_1\_33 $\times$ jurisdictiongn                      &              &                     & 0.5754       & 0.2414$^{*}$        & 0.0152        & 0.3077$^{***}$\\   
+                                                            &              &                     & (0.3613)     & (0.1303)            & (0.1172)      & (0.0573)\\   
+   post\_1\_31 $\times$ dep\_w                              &              &                     &              &                     & 0.0309        & -0.1355\\   
+                                                            &              &                     &              &                     & (0.3310)      & (0.1158)\\   
+   post\_1\_32 $\times$ dep\_w                              &              &                     &              &                     & -0.3360       & -0.1889\\   
+                                                            &              &                     &              &                     & (0.2688)      & (0.1197)\\   
+   post\_1\_33 $\times$ dep\_w                              &              &                     &              &                     & -0.5778$^{*}$ & -0.1611\\   
+                                                            &              &                     &              &                     & (0.3469)      & (0.1145)\\   
+   post\_1\_31 $\times$ dep\_w $\times$ jurisdictiongn      &              &                     &              &                     & 0.4608        & -0.0806\\   
+                                                            &              &                     &              &                     & (0.4042)      & (0.1241)\\   
+   post\_1\_32 $\times$ dep\_w $\times$ jurisdictiongn      &              &                     &              &                     & 0.3902        & 0.0649\\   
+                                                            &              &                     &              &                     & (0.3270)      & (0.1443)\\   
+   post\_1\_33 $\times$ dep\_w $\times$ jurisdictiongn      &              &                     &              &                     & 0.5602        & -0.0664\\   
+                                                            &              &                     &              &                     & (0.3650)      & (0.1372)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   jurisdiction\_department                                 & Yes          & Yes                 & Yes          & Yes                 & Yes           & Yes\\  
+   date                                                     & Yes          & Yes                 & Yes          & Yes                 & Yes           & Yes\\  
+   department\_month                                        & Yes          & Yes                 & Yes          & Yes                 & Yes           & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations                                             & 4,416        & 4,416               & 1,056        & 1,056               & 8,832         & 8,832\\  
+   R$^2$                                                    & 0.75704      & 0.86934             & 0.83308      & 0.86485             & 0.75451       & 0.86770\\  
+   Within R$^2$                                             & 0.00604      & 0.00678             & 0.02923      & 0.01782             & 0.00675       & 0.01900\\  
+   \midrule \midrule
+   \multicolumn{7}{l}{\emph{Clustered (jurisdiction\_department) standard-errors in parentheses}}\\
+   \multicolumn{7}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup

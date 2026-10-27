@@ -1,0 +1,34 @@
+\begingroup
+\centering
+\begin{tabular}{lcccccc}
+   \tabularnewline \midrule \midrule
+   Dependent Variables:                            & burglary & vehicle\_theft  & burglary     & vehicle\_theft  & burglary     & vehicle\_theft\\   
+   Model:                                          & (1)      & (2)             & (3)          & (4)             & (5)          & (6)\\  
+   \midrule
+   \emph{Variables}\\
+   post $\times$ treat                             & 0.0387   & -0.0243         &              &                 &              &   \\   
+                                                   & (0.0655) & (0.0592)        &              &                 &              &   \\   
+   post $\times$ dep\_n                            & 0.0289   & -0.0016         &              &                 & 0.0159       & 0.0243\\   
+                                                   & (0.0374) & (0.0518)        &              &                 & (0.0264)     & (0.0294)\\   
+   post $\times$ jurisdictiongn                    &          &                 & 0.1351$^{*}$ & 0.0260          & 0.0475$^{*}$ & 0.0636$^{**}$\\   
+                                                   &          &                 & (0.0711)     & (0.0390)        & (0.0254)     & (0.0267)\\   
+   post $\times$ dep\_w                            &          &                 &              &                 & -0.0612      & 0.0275\\   
+                                                   &          &                 &              &                 & (0.0521)     & (0.0313)\\   
+   post $\times$ dep\_w $\times$ jurisdictiongn    &          &                 &              &                 & 0.0882       & -0.0377\\   
+                                                   &          &                 &              &                 & (0.0726)     & (0.0459)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   jurisdiction\_department                        & Yes      & Yes             & Yes          & Yes             & Yes          & Yes\\  
+   date                                            & Yes      & Yes             & Yes          & Yes             & Yes          & Yes\\  
+   department\_month                               & Yes      & Yes             & Yes          & Yes             & Yes          & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations                                    & 4,416    & 4,416           & 1,056        & 1,056           & 8,832        & 8,832\\  
+   Squared Correlation                             & 0.93120  & 0.95063         & 0.95735      & 0.98067         & 0.96517      & 0.98676\\  
+   Pseudo R$^2$                                    & 0.83549  & 0.81466         & 0.90360      & 0.90928         & 0.91041      & 0.91850\\  
+   BIC                                             & 51,768.0 & 40,473.2        & 14,255.2     & 10,312.4        & 96,320.3     & 73,856.5\\  
+   \midrule \midrule
+   \multicolumn{7}{l}{\emph{Clustered (jurisdiction\_department) standard-errors in parentheses}}\\
+   \multicolumn{7}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup

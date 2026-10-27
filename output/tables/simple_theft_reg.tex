@@ -1,0 +1,35 @@
+\begingroup
+\centering
+\begin{tabular}{lcccc}
+   \tabularnewline \midrule \midrule
+   Dependent Variable: & \multicolumn{4}{c}{theft\_r}\\
+   Model:                    & (1)            & (2)                   & (3)            & (4)\\  
+   \midrule
+   \emph{Variables}\\
+   Constant                  & 0.9066$^{***}$ &                       &                &   \\   
+                             & (0.0398)       &                       &                &   \\   
+   post                      & 0.0577$^{***}$ &                       & 0.0595$^{***}$ &   \\   
+                             & (0.0192)       &                       & (0.0197)       &   \\   
+   treat                     & 0.4914$^{***}$ &                       &                &   \\   
+                             & (0.1476)       &                       &                &   \\   
+   dep\_n                    & 0.0835         &                       &                &   \\   
+                             & (0.0785)       &                       &                &   \\   
+   post $\times$ treat       & -0.0158        & -0.0158               & -0.0199        & -0.0199\\   
+                             & (0.0349)       & (0.0351)              & (0.0329)       & (0.0383)\\   
+   post $\times$ dep\_n      & -0.0009        & -0.0009               & -0.0043        & -0.0043\\   
+                             & (0.0333)       & (0.0335)              & (0.0330)       & (0.0383)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   jurisdiction\_department  &                & Yes                   &                & Yes\\  
+   date                      &                & Yes                   &                & Yes\\  
+   department\_month         &                &                       & Yes            & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations              & 4,416          & 4,416                 & 4,416          & 4,416\\  
+   R$^2$                     & 0.08667        & 0.64700               & 0.79651        & 0.80789\\  
+   Within R$^2$              &                & $5.65\times 10^{-5}$  & 0.01139        & 0.00015\\  
+   \midrule \midrule
+   \multicolumn{5}{l}{\emph{Clustered (jurisdiction\_department) standard-errors in parentheses}}\\
+   \multicolumn{5}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup

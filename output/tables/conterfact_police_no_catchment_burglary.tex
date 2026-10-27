@@ -1,0 +1,31 @@
+\begingroup
+\centering
+\begin{tabular}{lcccc}
+   \tabularnewline \midrule \midrule
+   Dependent Variable: & \multicolumn{4}{c}{burglary\_r}\\
+   Model:                        & (1)           & (2)          & (3)            & (4)\\  
+   \midrule
+   \emph{Variables}\\
+   Constant                      & 4.432$^{***}$ &              &                &   \\   
+                                 & (0.5855)      &              &                &   \\   
+   post                          & -0.2383       &              & -0.3854        &   \\   
+                                 & (0.2587)      &              & (0.2856)       &   \\   
+   jurisdictiongn                & -1.422$^{**}$ &              & -1.422$^{***}$ &   \\   
+                                 & (0.6400)      &              & (0.3634)       &   \\   
+   post $\times$ jurisdictiongn  & 0.5216$^{*}$  & 0.5216$^{*}$ & 0.5216         & 0.5216\\   
+                                 & (0.2962)      & (0.3028)     & (0.3204)       & (0.3285)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   jurisdiction\_department      &               & Yes          &                & Yes\\  
+   date                          &               & Yes          &                & Yes\\  
+   department\_month             &               &              & Yes            & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations                  & 1,056         & 1,056        & 1,056          & 1,056\\  
+   R$^2$                         & 0.13463       & 0.79899      & 0.65769        & 0.83284\\  
+   Within R$^2$                  &               & 0.02327      & 0.28377        & 0.02786\\  
+   \midrule \midrule
+   \multicolumn{5}{l}{\emph{Clustered (jurisdiction\_department) standard-errors in parentheses}}\\
+   \multicolumn{5}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup

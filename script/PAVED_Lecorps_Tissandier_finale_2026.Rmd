@@ -1,0 +1,1928 @@
+---
+title: "PAVED with good intentions - replication file"
+output:
+  html_document:
+  pdf_document: default
+  toc: true
+---
+
+This markdown will lead you to the results of our paper "PAVED with good
+intentions"
+
+
+# Setup 
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+library(readxl)    
+library(lubridate)
+library(tidyverse)
+library(fixest)
+library(ggfixest)
+library(HonestDiD)
+
+# power function
+
+power.twoside <- function(betaA,alpha,stderrorE){
+  return(pnorm(-abs(betaA)/(stderrorE)-qnorm(1-alpha/2))+pnorm(abs(betaA)/(stderrorE)-qnorm(1-alpha/2)))
+}
+
+```
+
+# Data import and cleaning
+
+## Import of the df
+
+The dataframe are available in xls format, with one department per
+sheet, so the import is a bit tedious
+
+```{r database import, include=FALSE}
+read_excel_allsheets <- function(filename, tibble = FALSE) {
+  sheets <- readxl::excel_sheets(filename)
+  x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+  if(!tibble) x <- lapply(x, as.data.frame)
+  names(x) <- sheets
+  x
+}
+
+gn_4001 <- read_excel_allsheets("../data/tableaux-4001-gn.xlsx")
+pn_4001 <- read_excel_allsheets("../data/tableaux-4001-pn.xlsx")
+
+```
+
+```{r}
+
+gn_4001 <- gn_4001[-c(1,2, 99:109)]
+gn_4001 <-  bind_rows(gn_4001, .id = "department")
+
+pn_4001 <- pn_4001[-c(1,2, 99:109)]
+pn_4001 <-  bind_rows(pn_4001, .id = "department")
+
+# First, save the index/libelle index correspondancy 
+
+index_4001 <- gn_4001[1:107, c("Index", "libellé index")]
+
+# Then drop libelle index
+
+gn_4001 <- gn_4001[, -3]
+pn_4001 <- pn_4001[, -3]
+
+# Full wide dataset 
+
+gn_4001 <- pivot_longer(gn_4001, cols = !c(department, Index), names_to = "date", values_to = "count")
+pn_4001 <- pivot_longer(pn_4001, cols = !c(department, Index), names_to = "date", values_to = "count")
+
+# Add the i mark for conveniency + jurisdiction indicator
+
+gn_4001$jurisdiction <- "gn"
+pn_4001$jurisdiction <- "pn"
+
+gn_4001$index <- paste0("i", gn_4001$Index)
+pn_4001$index <- paste0("i", pn_4001$Index)
+
+# Extract year and month from date 
+
+gn_4001$year <- substr(gn_4001$date,2,5)
+gn_4001$month <- substr(gn_4001$date,7,8)
+
+pn_4001$year <- substr(pn_4001$date,2,5)
+pn_4001$month <- substr(pn_4001$date,7,8)
+
+# Select only interesting columns
+
+gn_4001 <- subset(gn_4001, select = c("department", "jurisdiction", "index", "year", "month", "count"))
+pn_4001 <- subset(pn_4001, select = c("department", "jurisdiction", "index", "year", "month", "count"))
+
+# We can finally pivot to wide with the offense
+
+gn_4001 <- pivot_wider(gn_4001, names_from = "index", values_from = "count")
+pn_4001 <- pivot_wider(pn_4001, names_from = "index", values_from = "count")
+
+# Final merge
+
+gn_pn_4001 <- rbind(gn_4001, pn_4001)
+
+# Clean unused elements
+
+rm(gn_4001, pn_4001, gn_4001_t, pn_4001_t)
+
+```
+
+## Data cleaning and indicators creation
+
+```{r indicators, include=FALSE}
+
+# Treated and neighboring department vector 
+
+dep_w <- c("04", "31","34","38","44","59","60","63","67", "77", "83" ) 
+
+ne_dep <- c("01", "02", "03", "05", "06", "09", "10", "11", "12", "13", "15", "19", "23", "26","27", "30", "32", "35", "42", "45", "49", "51", "56", "57", "62", "65", "68", "69", "73", "76", "80", "81", "82", "84","85", "88", "89", "95")
+
+# did indicators, fixed effects and cluster levels
+
+gn_pn_4001$date <- as.Date(paste0(gn_pn_4001$year, "-", gn_pn_4001$month, "-", "01"), format = "%Y-%m-%d")
+gn_pn_4001$post <- ifelse(gn_pn_4001$date >= as.Date("2017-10-01"), 1,0)
+
+gn_pn_4001$post_1_3 <- factor(ifelse(gn_pn_4001$date >= as.Date("2017-10-01") & gn_pn_4001$date < as.Date("2018-03-01"), 1,
+                              ifelse(gn_pn_4001$date >= as.Date("2018-03-01") & gn_pn_4001$date < as.Date("2018-08-01"), 2, ifelse(gn_pn_4001$date >= as.Date("2018-08-01") & gn_pn_4001$date <= as.Date("2018-12-01"), 3,0))))
+
+
+
+gn_pn_4001$treat <- ifelse(gn_pn_4001$department %in% dep_w & gn_pn_4001$jurisdiction == "gn", 1 ,0)
+
+gn_pn_4001$dep_w <- ifelse(gn_pn_4001$department %in% dep_w, 1, 0) 
+gn_pn_4001$dep_n <- ifelse(gn_pn_4001$department %in% ne_dep, 1, 0)
+
+gn_pn_4001$department_month <- paste0(gn_pn_4001$department, "_", gn_pn_4001$month)
+
+gn_pn_4001$jurisdiction_department <- paste0(gn_pn_4001$jurisdiction, "_", gn_pn_4001$department)
+
+# We have population data only since 2006, so we can restrict the dataset
+
+gn_pn_4001 <- subset(gn_pn_4001, subset = year >= 2006)
+
+```
+
+## Import and merge the population per jurisdiction and department 
+
+Source: https://www.insee.fr/fr/statistiques/3698339#consulter
+
+```{r}
+
+# Import and clean
+
+population <- read.csv("../data/population_2006_2021.csv", sep = ',')
+population <- population[, c(1:3, 5:20)]
+
+population <- subset(population, subset = !(DEP %in% c("971", "972", "973","974")))
+
+
+population$DEP <- ifelse(nchar(population$DEP) == 1, str_pad(population$DEP, 2, pad = "0"), as.character(population$DEP))
+
+population$CODGEO <- ifelse(nchar(population$CODGEO) == 4, str_pad(population$CODGEO, 5, pad = "0"), as.character(population$CODGEO)) 
+
+# Pivot population in long format
+
+population <- pivot_longer(population, cols = !c(CODGEO, REG, DEP), names_to = "year", values_to = "population")
+population$year <- substr(population$year, 5,8)
+
+```
+
+```{r}
+
+comp_territorial <- read.csv("../data/export-competence-territoriale-pn-gn.csv", sep = ";")
+
+population <- merge(population, subset(comp_territorial, select = c("code_commune", "institution")), by.x = "CODGEO", by.y = "code_commune", all.x = T)
+
+colnames(population) <- c("codgeo", "region", "department", "year", "population", "jurisdiction")
+
+population <- subset(population, subset = complete.cases(jurisdiction))
+population$jurisdiction <- tolower(population$jurisdiction)
+population$population <- as.numeric(population$population)
+# sum by department and jurisdiction 
+
+population_dep_juris <- population %>% group_by(department, jurisdiction, year) %>% summarise(population = sum(population))
+
+
+# final merge
+
+gn_pn_4001 <- merge(gn_pn_4001, population_dep_juris, by = c("department", "jurisdiction", "year"), all.x = T)
+
+# We can drop all the observations without population = pn for 75, 92, 93, 94
+
+gn_pn_4001 <- subset(gn_pn_4001, subset = complete.cases(population))
+
+```
+
+## Crime level and rate 
+
+```{r data_cleaning, include=FALSE}
+
+# We check the effect of PAVED on 4 indicators : 
+# House robery (27 and 28), car stealing (34 and 35), and stealing of motorcycle (36 )
+
+gn_pn_4001$burglary <- gn_pn_4001$i27 + gn_pn_4001$i28
+gn_pn_4001$burglary_r <- (gn_pn_4001$burglary/gn_pn_4001$population)*10000
+
+gn_pn_4001$vehicle_theft <-  gn_pn_4001$i34 + gn_pn_4001$i35 + gn_pn_4001$i36
+gn_pn_4001$vehicle_theft_r <- (gn_pn_4001$vehicle_theft/gn_pn_4001$population)*10000
+
+# Alternative type of crime: theft and theft from auto 
+
+gn_pn_4001$theft <- gn_pn_4001$i32 + gn_pn_4001$i33
+gn_pn_4001$theft_r <- (gn_pn_4001$theft/gn_pn_4001$population)*10000
+
+gn_pn_4001$tfa <- gn_pn_4001$i37 + gn_pn_4001$i38
+gn_pn_4001$tfa_r <- (gn_pn_4001$tfa/gn_pn_4001$population)*10000
+
+gn_pn_4001$dealing <- gn_pn_4001$i55
+gn_pn_4001$dealing_r <- (gn_pn_4001$dealing/gn_pn_4001$population)*10000
+
+# Create our working base  : exclude paris
+
+gn_pn_4001_province <- subset(gn_pn_4001, subset = !(gn_pn_4001$department %in% c("75", "92", "93", "94")))
+
+```
+
+# Analysis 
+
+We organize the analysis into three parts. For each parts is provided super plots as well as the regression results. The parts are organized as follow: 
+
+1. We compare only Gendarmerie areas. The adopted conterfactual is the Gendarmerie areas which didn't received PAVED. We create a dataset with only Gendarmerie areas.
+2. We compare Gendarmerie areas with Police areas. The conterfactual here is the police areas in department which are treated. The intuition is that within a given department, police and gendarmerie areas should behave the same, except when the gendarmerie is now equipped with PAVED. Here, we keep only the treated department, with police and gendarmerie areas
+3. We compare the variation between gendarmerie and police areas within control department pre-post paved with the variation between gendarmerie and police areas within treated department pre-post paved. It is a triple difference in difference. Here, we keep all the observations
+
+For each setup, we implement four range of fixed effects: 
+1. canonical did (no fe)
+2. department + date (two-way fixed effects) 
+3. department_month (seasonality)
+4. department + date + department_month (full range)
+
+We estimate these models on the rate of burglary and vehicle theft.
+
+Following traditional literature on the subject, we cluster at the level of intervention, which is the jurisdiction x department indicator.
+
+## Dataset creation 
+
+```{r}
+
+# for regressions
+
+df_gendarmerie <- subset(gn_pn_4001_province, subset =  gn_pn_4001_province$jurisdiction == "gn" & gn_pn_4001_province$year >= 2015 & gn_pn_4001_province$year < 2019)
+
+df_gendarmerie_police <- subset(gn_pn_4001_province, subset = gn_pn_4001_province$dep_w == 1 & gn_pn_4001_province$year >= 2015 & gn_pn_4001_province$year < 2019)
+
+df_didid <- subset(gn_pn_4001_province, subset = gn_pn_4001_province$year >= 2015 & gn_pn_4001_province$year < 2019)
+
+# all months of the regression window, used as x-axis limits in event-study plots
+
+all_dates <- sort(unique(df_didid$date))
+
+# for plots
+
+df_gendarmerie_plot <- subset(gn_pn_4001_province, subset = gn_pn_4001_province$jurisdiction == "gn" & gn_pn_4001_province$year >= 2010 & gn_pn_4001_province$year < 2019)
+
+df_gendarmerie_police_plot <- subset(gn_pn_4001_province, subset = gn_pn_4001_province$dep_w == 1 & gn_pn_4001_province$year >= 2010 & gn_pn_4001_province$year < 2019)
+
+df_didid_plot <- subset(gn_pn_4001_province, subset = gn_pn_4001_province$year >= 2010 & gn_pn_4001_province$year < 2019)
+
+
+# Indicator for plot 
+
+df_gendarmerie <- df_gendarmerie %>%
+  mutate(period = case_when(
+    date < as.Date("2017-10-01") ~ "Pre",
+    date >= as.Date("2017-10-01") ~ "Post"
+  ),
+  group = paste0(period, "_", treat) # Creates four groups: Pre_0, Pre_1, Post_0, Post_1
+  )
+
+df_gendarmerie_police <- df_gendarmerie_police %>%
+  mutate(period = case_when(
+    date < as.Date("2017-10-01") ~ "Pre",
+    date >= as.Date("2017-10-01") ~ "Post"
+  ),
+  group = paste0(period, "_", jurisdiction) # Creates four groups: Pre_0, Pre_1, Post_0, Post_1
+  )
+
+df_didid <- df_didid %>%
+  mutate(period = case_when(
+    date < as.Date("2017-10-01") ~ "Pre",
+    date >= as.Date("2017-10-01") ~ "Post"
+  ),
+  group = paste0(period, "_", jurisdiction) # Creates four groups: Pre_0, Pre_1, Post_0, Post_1
+  )
+
+```
+
+# Analysis: catchment area outside of the control group
+
+## Estimation: comparing gendarmerie areas
+
+### Plot
+
+```{r}
+
+ggplot(df_gendarmerie, aes(y = burglary_r, x = date, color = as.factor(dep_w), group = as.factor(dep_w))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y", limits = as.Date(c('2015-01-01','2018-12-01'))) + 
+  geom_smooth(aes(group = group), method = "lm", se = TRUE) + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Group", y = "Burglary rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3','forestgreen'), labels=c("Control", "Treatment")) +
+  scale_y_continuous()
+
+ggsave("../output/counterfactual_gendarmerie_burglary_r.pdf", width = 2700, height = 1800, units = "px")
+
+# vehicle theft
+
+ggplot(df_gendarmerie, aes(y = vehicle_theft_r, x = date, color = as.factor(dep_w), group = as.factor(dep_w))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y", limits = as.Date(c('2015-01-01','2018-12-01'))) + 
+  geom_smooth(aes(group = group), method = "lm", se = TRUE) + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Group", y = "Vehicle theft rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3','forestgreen'), labels=c("Control", "Treatment")) +
+  scale_y_continuous()
+
+ggsave("../output/counterfactual_gendarmerie_vehicle_theft_r.pdf", width = 2700, height = 1800, units = "px")
+
+```
+
+
+
+### Regression 
+
+Models from this section are refered as "cg_" ( counterfactual gendarmerie)
+
+First, create a fixed effect as interaction of treatment and period, for trend correction 
+
+```{r}
+
+df_gendarmerie$trend_correction_treat <- ifelse(df_gendarmerie$dep_w == 1, df_gendarmerie$period, 0)
+
+
+df_gendarmerie$trend_correction_control <- ifelse(df_gendarmerie$dep_w == 0, df_gendarmerie$period, 0)
+
+```
+
+
+#### Burglary
+
+```{r}
+
+
+cg_burglary1 <- feols(burglary_r ~ post + treat + dep_n + post:treat + dep_n:post, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_burglary2 <- feols(burglary_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_burglary3 <- feols(burglary_r ~ post + treat + dep_n + post:treat + dep_n:post | department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_burglary4 <- feols(burglary_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+
+etable(cg_burglary1, cg_burglary2, cg_burglary3, cg_burglary4)
+
+file_path <- "../output/tables/conterfact_gendarmerie_catchment_burglary.tex"
+sink(file_path)
+etable(cg_burglary1, cg_burglary2, cg_burglary3, cg_burglary4, tex = T)
+sink()
+
+# Power 
+
+se_tau_cg_burglary4 <- se(cg_burglary4)["post:treat"]
+coeff_tau_cg_burglary4 <- coef(cg_burglary4)["post:treat"]
+
+paste0("The power of our test of the treatment parameters is ", power.twoside(coeff_tau_cg_burglary4, 0.05, se_tau_cg_burglary4), " which means we have a ", power.twoside(coeff_tau_cg_burglary4, 0.05, se_tau_cg_burglary4), " probability of detecting such effect if it was the true effect")
+
+```
+
+Event study plot
+
+```{r}
+
+cg_burglary1_es <- feols(
+  burglary_r ~  i(date, treat, ref = as.Date("2017-09-01")) | date + jurisdiction_department,
+  data = subset(df_gendarmerie, dep_n == 0),
+  cluster = ~ jurisdiction_department
+)
+
+summary(cg_burglary1_es)
+
+
+# Plot
+
+keep <- c("2017-10-01", "2015-06-01", "2015-12-01", "2016-06-01", "2016-12-01", "2017-06-01", "2017-12-01", "2018-06-01")
+
+ggiplot(cg_burglary1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 2) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.8)) +
+  labs(
+    title = "Event study: Burglary rate - counterfactual Gendarmerie (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+
+#
+
+pdf("../output/event_study_conterfact_gendarmerie_burglary_r.pdf", width = 14, height = 8)
+ggiplot(cg_burglary1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 2) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Burglary rate - counterfactual Gendarmerie (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+dev.off()
+
+```
+
+
+#### Vehicle theft
+
+```{r}
+
+hist(df_gendarmerie$vehicle_theft_r)
+
+#
+
+cg_vehicle_theft1 <- feols(vehicle_theft_r ~ post + treat + dep_n + post:treat + dep_n:post, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_vehicle_theft2 <- feols(vehicle_theft_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_vehicle_theft3 <- feols(vehicle_theft_r ~ post + treat + dep_n + post:treat + dep_n:post | department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_vehicle_theft4 <- feols(vehicle_theft_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+
+etable(cg_vehicle_theft1, cg_vehicle_theft2, cg_vehicle_theft3, cg_vehicle_theft4)
+
+
+file_path <- "../output/tables/conterfact_gendarmerie_catchment_vehicle.tex"
+sink(file_path)
+etable(cg_vehicle_theft1, cg_vehicle_theft2, cg_vehicle_theft3, cg_vehicle_theft4, tex = T)
+sink()
+
+# Power 
+
+se_tau_cg_vehicle_theft4 <- se(cg_vehicle_theft4)["post:treat"]
+coeff_tau_cg_vehicle_theft4 <- coef(cg_vehicle_theft4)["post:treat"]
+
+paste0("The power of our test of the treatment parameters is ", power.twoside(coeff_tau_cg_vehicle_theft4, 0.05, se_tau_cg_vehicle_theft4), " which means we have a ", power.twoside(coeff_tau_cg_vehicle_theft4, 0.05, se_tau_cg_vehicle_theft4), " probability of detecting such effect if it was the true effect")
+
+
+```
+
+Event study plot
+
+```{r}
+
+# vehicle theft 
+
+cg_vehicle_theft1_es <- feols(vehicle_theft_r ~ i(as.factor(date),treat, ref = "2017-09-01") | jurisdiction_department + date, subset(df_gendarmerie, subset = dep_n == 0), cluster = 'jurisdiction_department')
+
+
+ggiplot(cg_vehicle_theft1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Vehicle theft rate - counterfactual Gendarmerie (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+
+
+#
+pdf("../output/event_study_conterfact_gendarmerie_vehicle_r.pdf", width = 14, height = 8)
+ggiplot(cg_vehicle_theft1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Vehicle theft rate - counterfactual Gendarmerie (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+dev.off()
+
+```
+
+
+## Estimation: comparing gendarmerie with police areas
+
+Here the notation are a little bit more tricky: the treatment indicators is the jurisdiction, as we are working within treated department, but only the gendarmerie received PAVED in these departments.
+
+### Plot
+
+```{r}
+
+ggplot(df_gendarmerie_police, aes(y = burglary_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y", limits = as.Date(c('2015-01-01','2018-12-01'))) + 
+  geom_smooth(aes(group = group), method = "lm", se = TRUE) + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Group", y = "Burglary rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3', 'forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous()
+
+ggsave("../output/counterfactual_police_burglary_r.pdf", width = 2700, height = 1800, units = "px")
+
+# vehicle theft
+
+ggplot(df_gendarmerie_police, aes(y = vehicle_theft_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y", limits = as.Date(c('2015-01-01','2018-12-01'))) + 
+  geom_smooth(aes(group = group), method = "lm", se = TRUE) + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Group", y = "Vehicle theft rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3','forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous()
+
+ggsave("../output/counterfactual_police_vehicle_theft_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+```
+
+### Regression
+
+The model from this section are refered as "gp_" (gendarmerie and police comparison). First we start by relevel jurisdiction for pn to be the reference: 
+
+```{r}
+
+df_gendarmerie_police$jurisdiction <- as.factor(df_gendarmerie_police$jurisdiction)
+df_gendarmerie_police$jurisdiction <- relevel(df_gendarmerie_police$jurisdiction, "pn")
+
+```
+
+#### Burglary
+
+```{r}
+
+gp_burglary1 <- feols(burglary_r ~ post + jurisdiction + post:jurisdiction, df_gendarmerie_police, cluster = 'jurisdiction_department')
+gp_burglary2 <- feols(burglary_r ~ post + jurisdiction + post:jurisdiction | jurisdiction_department + date, df_gendarmerie_police, cluster = 'jurisdiction_department')
+gp_burglary3 <- feols(burglary_r ~ post + jurisdiction + post:jurisdiction | department_month, df_gendarmerie_police, cluster = 'jurisdiction_department')
+gp_burglary4 <- feols(burglary_r ~ post + jurisdiction + post:jurisdiction | jurisdiction_department + date + department_month, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+etable(gp_burglary1, gp_burglary2, gp_burglary3, gp_burglary4)
+
+file_path <- "../output/tables/conterfact_police_no_catchment_burglary.tex"
+sink(file_path)
+etable(gp_burglary1, gp_burglary2, gp_burglary3, gp_burglary4, tex = T)
+sink()
+
+
+```
+
+Event study 
+
+```{r}
+
+
+df_gendarmerie_police$jurisdiction_gn <- ifelse(df_gendarmerie_police$jurisdiction == "gn", 1, 0)
+df_gendarmerie_police$date <- as.Date(df_gendarmerie_police$date)
+
+#
+
+gp_burglary1_es <- feols(burglary_r ~ i(date, jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+#
+
+ggiplot(gp_burglary1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Burglary rate - counterfactual Police (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+
+# ggfixest 
+
+pdf("../output/event_study_conterfact_police_burglary_r.pdf", width = 14, height = 8)
+ggiplot(gp_burglary1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Burglary rate - counterfactual Police (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+dev.off()
+
+```
+
+#### Vehicle theft
+
+```{r}
+
+gp_vehicle_theft1 <- feols(vehicle_theft_r ~ post + jurisdiction + post:jurisdiction, df_gendarmerie_police, cluster = 'jurisdiction_department')
+gp_vehicle_theft2 <- feols(vehicle_theft_r ~ post + jurisdiction + post:jurisdiction | jurisdiction_department + date, df_gendarmerie_police, cluster = 'jurisdiction_department')
+gp_vehicle_theft3 <- feols(vehicle_theft_r ~ post + jurisdiction + post:jurisdiction | department_month, df_gendarmerie_police, cluster = 'jurisdiction_department')
+gp_vehicle_theft4 <- feols(vehicle_theft_r ~ post + jurisdiction + post:jurisdiction | jurisdiction_department + date + department_month, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+etable(gp_vehicle_theft1, gp_vehicle_theft1, gp_vehicle_theft3, gp_vehicle_theft4)
+
+
+file_path <- "../output/tables/conterfact_police_no_catchment_vehicle.tex"
+sink(file_path)
+etable(gp_vehicle_theft1, gp_vehicle_theft2, gp_vehicle_theft3, gp_vehicle_theft4, tex = T)
+sink()
+
+
+```
+
+Event study plot 
+
+```{r}
+
+gp_vehicle_theft1_es <- feols(vehicle_theft_r ~ i(date, jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+#
+
+pdf("../output/event_study_conterfact_police_vehicle_r.pdf", width = 14, height = 8)
+ggiplot(gp_vehicle_theft1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Vehicle theft rate - counterfactual Police (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+dev.off()
+
+
+ggiplot(gp_vehicle_theft1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Vehicle theft rate - counterfactual Police (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+
+```
+
+
+## Estimation: triple diff-in-diff
+
+Here, we compare jurisdiction within a given department, and between control and treatment department 
+
+### Plot
+
+We separate control (dep_w = 0) and treated department (dep_w = 1) 
+
+```{r}
+
+df_didid$dep_w_plot <- ifelse(df_didid$dep_w == 1, "Treatment", "Control")
+
+ggplot(df_didid, aes(y = burglary_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y", limits = as.Date(c('2015-01-01','2018-12-01'))) + 
+  geom_smooth(aes(group = group), method = "lm", se = TRUE) + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Group", y = "Burglary rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3', 'forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous() + 
+  facet_wrap(~ dep_w_plot, ncol = 1)
+
+ggsave("../output/counterfactual_didid_burglary_r.pdf", width = 2700, height = 2700, units = "px")
+
+####
+
+ggplot(df_didid, aes(y = vehicle_theft_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y", limits = as.Date(c('2015-01-01','2018-12-01'))) + 
+  geom_smooth(aes(group = group), method = "lm", se = TRUE) + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Group", y = "Vehicle theft rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3', 'forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous() + 
+  facet_wrap(~ dep_w_plot, ncol = 1)
+
+ggsave("../output/counterfactual_didid_vehicle_theft_r.pdf", width = 2700, height = 2700, units = "px")
+
+```
+
+### Regression 
+
+Models here are refered as "d3" (for triple diff)
+
+```{r}
+
+df_didid$jurisdiction <- as.factor(df_didid$jurisdiction)
+df_didid$jurisdiction <- relevel(df_didid$jurisdiction, "pn")
+
+```
+
+#### Burglary
+
+```{r}
+
+cd3_burglary1 <- feols(burglary_r ~ post*dep_w*jurisdiction + post*dep_n, df_didid, cluster = 'jurisdiction_department')
+cd3_burglary2 <- feols(burglary_r ~ post*dep_w*jurisdiction + post*dep_n | jurisdiction_department + date, df_didid, cluster = 'jurisdiction_department')
+cd3_burglary3 <- feols(burglary_r ~ post*dep_w*jurisdiction + post*dep_n | department_month, df_didid, cluster = 'jurisdiction_department')
+cd3_burglary4 <- feols(burglary_r ~ post*dep_w*jurisdiction + post*dep_n | jurisdiction_department + date + department_month, df_didid, cluster = 'jurisdiction_department')
+
+etable(cd3_burglary1, cd3_burglary2, cd3_burglary3, cd3_burglary4)
+
+file_path <- "../output/tables/conterfact_d3_catchment_burglary.tex"
+sink(file_path)
+etable(cd3_burglary1, cd3_burglary2, cd3_burglary3, cd3_burglary4, tex = T)
+sink()
+
+
+```
+
+Event study plot 
+
+```{r}
+
+df_didid$jurisdiction_gn <- ifelse(df_didid$jurisdiction == "gn", 1, 0)
+df_didid$date <- as.Date(df_didid$date)
+
+
+d3_burglary1_es <- feols(burglary_r ~ i(date, dep_w*jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_didid, cluster = 'jurisdiction_department')
+
+#
+
+pdf("../output/event_study_conterfact_3d_burglary_r.pdf", width = 14, height = 8)
+ggiplot(d3_burglary1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Burglary rate - DiDiD counterfactual (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+dev.off()
+
+ggiplot(d3_burglary1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Burglary rate - DiDiD counterfactual (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+
+
+```
+
+#### Vehicle theft
+
+```{r}
+
+cd3_vehicle_theft1 <- feols(vehicle_theft_r ~ post*dep_w*jurisdiction + post*dep_n, df_didid, cluster = 'jurisdiction_department')
+cd3_vehicle_theft2 <- feols(vehicle_theft_r ~ post*dep_w*jurisdiction + post*dep_n | jurisdiction_department + date, df_didid, cluster = 'jurisdiction_department')
+cd3_vehicle_theft3 <- feols(vehicle_theft_r ~ post*dep_w*jurisdiction + post*dep_n | department_month, df_didid, cluster = 'jurisdiction_department')
+cd3_vehicle_theft4 <- feols(vehicle_theft_r ~ post*dep_w*jurisdiction + post*dep_n | jurisdiction_department + date + department_month, df_didid, cluster = 'jurisdiction_department')
+
+etable(cd3_vehicle_theft1, cd3_vehicle_theft2, cd3_vehicle_theft3, cd3_vehicle_theft4)
+
+file_path <- "../output/tables/conterfact_d3_catchment_vehicle.tex"
+sink(file_path)
+etable(cd3_vehicle_theft1, cd3_vehicle_theft2, cd3_vehicle_theft3, cd3_vehicle_theft4, tex = T)
+sink()
+
+
+```
+
+Event study plot 
+
+```{r}
+
+df_didid$jurisdiction_gn <- ifelse(df_didid$jurisdiction == "gn", 1, 0)
+
+d3_vehicle_theft_1_es <- feols(vehicle_theft_r ~ i(date, dep_w*jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_didid, cluster = 'jurisdiction_department')
+
+#
+pdf("../output/event_study_conterfact_3d_vehicle_r.pdf", width = 14, height = 8)
+ggiplot(d3_vehicle_theft_1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Vehicle theft rate - DiDiD counterfactual (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+dev.off()
+
+
+ggiplot(d3_vehicle_theft_1_es, aggr_eff = "both", aggr_eff.par = list(col = "black"), geom_style = 'ribbon') +
+  aes(group = 1) +
+  scale_x_discrete(limits = as.character(all_dates), breaks = keep) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), line = element_line(linewidth = 0.4)) +
+  labs(
+    title = "Event study: Vehicle theft rate - DiDiD counterfactual (TWFE)",
+    x = "Date",
+    y = "Period specific TE"
+  )
+
+```
+
+
+# Robustness check: Count regression 
+
+In this section, we expand on the results obtained for the Gendarmerie areas only analysis. We spotted a negative effect of 0.2 percentage points. However, we used an OLS regression to obtain these results, based on an outcome which is essentially a count. 
+
+```{r}
+
+hist(df_gendarmerie$burglary_r)
+hist(df_gendarmerie$vehicle_theft_r)
+
+```
+If we look at the histogram of the rate of burglary and vehicle theft, we can observe that the distributions are not standard distribution. Then, we estimate a count  regressions to ensure that our results are not due to a wrong model choice. 
+
+GLM with count distribution use a log link function. Thus, we have to check the pre-trend with the log of the crime level. 
+
+### Plot
+
+```{r}
+
+ggplot(df_gendarmerie, aes(y = log(burglary), x = date, color = factor(treat), group = factor(treat))) + 
+  stat_summary(fun = "mean", geom = "line") 
+
+ggplot(df_gendarmerie, aes(y = log(vehicle_theft), x = date, color = factor(treat), group = factor(treat))) + 
+  stat_summary(fun = "mean", geom = "line") 
+
+```
+
+Still quite convincing, we can proceed to the regressions.
+
+### Regression
+
+Since we are interested in the rate of crime, we add the population as an offset in the specification. 
+
+But the question is: which kind of regression to use? Poisson regression needs the mean of the distribution to be roughly equal to the variance, which is clearly not the case as we have a strong overdispersion. Negative Binomial can be an alternative, but require the distribution to be exactly negative binomial, which is not the case. Quasi poisson regression can be an answer. 
+
+Both negative binomial and quasi poisson are made to model over-dispersed outcomes. However, the quasi poisson assumes that the variance of the model is linear to the mean, while the negative binomial assumes it is quadratic. 
+
+```{r}
+
+g_poisson_burglary1 <- fenegbin(burglary ~ post + treat + post:treat, df_gendarmerie, cluster = 'jurisdiction_department', offset = ~log(population))
+g_poisson_burglary2 <- fenegbin(burglary ~ post:treat | department + date, df_gendarmerie, cluster = 'jurisdiction_department', offset = ~log(population))
+g_poisson_burglary3 <- fenegbin(burglary ~ post + post:treat | department_month, df_gendarmerie, cluster = 'jurisdiction_department', offset = ~log(population))
+g_poisson_burglary4 <- fenegbin(burglary ~ post:treat | department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department', offset = ~log(population))
+
+etable(g_poisson_burglary1, g_poisson_burglary2, g_poisson_burglary3, g_poisson_burglary4)
+
+```
+
+```{r}
+
+g_poisson_vehicle_theft1 <- feglm(vehicle_theft ~ post + treat + post:treat, df_gendarmerie, cluster = 'jurisdiction_department', family=quasipoisson, offset = log(df_gendarmerie$population))
+g_poisson_vehicle_theft2 <- feglm(vehicle_theft ~ post:treat | department + date, df_gendarmerie, cluster = 'jurisdiction_department', family=quasipoisson, offset =log(df_gendarmerie$population))
+g_poisson_vehicle_theft3 <- feglm(vehicle_theft ~ post:treat | department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department', family=quasipoisson, offset = log(df_gendarmerie$population))
+
+g_poisson_vehicle_theft4 <- fenegbin(vehicle_theft ~ post:treat | department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department', offset = log(df_gendarmerie$population))
+
+# results
+
+etable(g_poisson_vehicle_theft1, g_poisson_vehicle_theft2, g_poisson_vehicle_theft3, g_poisson_vehicle_theft4)
+
+```
+
+# Review 
+
+## Effect in percentage
+
+Run the final regressions with Poisson regression, offset for the population, and calculate the effect in percentage 
+
+```{r}
+
+df_didid$jurisdiction <- as.factor(df_didid$jurisdiction)
+df_didid$jurisdiction <- relevel(df_didid$jurisdiction, "pn")
+
+df_gendarmerie_police$jurisdiction <- as.factor(df_gendarmerie_police$jurisdiction)
+
+df_gendarmerie_police$jurisdiction <- relevel(df_gendarmerie_police$jurisdiction, "pn")
+
+cg_burglary4_percentage <- fepois(burglary ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department', offset = log(df_gendarmerie$pop))
+
+cg_vehicle_theft4_percentage <- fepois(vehicle_theft ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department', offset = log(df_gendarmerie$pop))
+
+gp_burglary4_percentage <- fepois(burglary ~ post + jurisdiction + post:jurisdiction | jurisdiction_department + date + department_month, df_gendarmerie_police, cluster = 'jurisdiction_department', offset = log(df_gendarmerie_police$pop))
+
+gp_vehicle_theft4_percentage <- fepois(vehicle_theft ~ post + jurisdiction + post:jurisdiction | jurisdiction_department + date + department_month, df_gendarmerie_police, cluster = 'jurisdiction_department', offset = log(df_gendarmerie_police$pop))
+
+cd3_burglary4_percentage <- fepois(burglary ~ post*dep_w*jurisdiction + post*dep_n | jurisdiction_department + date + department_month, df_didid, cluster = 'jurisdiction_department', offset = log(df_didid$pop))
+
+cd3_vehicle_theft4_percentage <- fepois(vehicle_theft ~ post*dep_w*jurisdiction + post*dep_n | jurisdiction_department + date + department_month, df_didid, cluster = 'jurisdiction_department', offset = log(df_didid$pop))
+
+file_path <- "../output/tables/poisson_reg_model4.tex"
+sink(file_path)
+etable(cg_burglary4_percentage, cg_vehicle_theft4_percentage, gp_burglary4_percentage, gp_vehicle_theft4_percentage, cd3_burglary4_percentage, cd3_vehicle_theft4_percentage, tex = T)
+sink()
+
+etable(cg_burglary4_percentage, cg_vehicle_theft4_percentage, gp_burglary4_percentage, gp_vehicle_theft4_percentage, cd3_burglary4_percentage, cd3_vehicle_theft4_percentage)
+
+
+summary(df_gendarmerie$burglary_r)
+
+
+
+###
+
+library(fixest)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(purrr)
+library(broom)
+library(xtable)
+
+# Named mapping of models to the term to extract
+coef_map <- c(
+  cg_burglary4_percentage      = "post:treat",
+  cg_vehicle_theft4_percentage = "post:treat ",
+  gp_burglary4_percentage      = "post:jurisdictiongn",
+  gp_vehicle_theft4_percentage = "post:jurisdictiongn",
+  cd3_burglary4_percentage     = "post:dep_w:jurisdictiongn",
+  cd3_vehicle_theft4_percentage= "post:dep_w:jurisdictiongn"
+)
+
+models <- list(
+  cg_burglary4_percentage      = cg_burglary4_percentage,
+  cg_vehicle_theft4_percentage = cg_vehicle_theft4_percentage,
+  gp_burglary4_percentage      = gp_burglary4_percentage,
+  gp_vehicle_theft4_percentage = gp_vehicle_theft4_percentage,
+  cd3_burglary4_percentage     = cd3_burglary4_percentage,
+  cd3_vehicle_theft4_percentage= cd3_vehicle_theft4_percentage
+)
+# Function to extract stats from a fixest poisson model
+extract_info <- function(model_name, model_obj) {
+  
+  est <- broom::tidy(model_obj, conf.int = TRUE)
+  
+  est %>%
+    mutate(
+      model = model_name,
+      
+      # IRR and CI
+      IRR = exp(estimate),
+      IRR_low = exp(conf.low),
+      IRR_high = exp(conf.high),
+      
+      # Percent effects
+      pct =  (IRR - 1) * 100,
+      pct_low = (IRR_low - 1) * 100,
+      pct_high = (IRR_high - 1) * 100
+    ) %>%
+    select(
+      model, term, estimate, IRR,  std.error,
+      pct, pct_low, pct_high
+    )
+}
+
+# Build full table
+results_table <- as.data.frame(map2_df(names(models), models, extract_info))
+results_table <- cbind(subset(results_table, select = c(model, term)),  apply(subset(results_table, select = -c(model, term)), 2, as.numeric))
+results_table <- cbind(subset(results_table, select = c(model, term)),  apply(subset(results_table, select = -c(model, term)), 2, function(x) round(x, 2)))
+
+results_table
+
+xtable(results_table)
+
+```
+
+## Effect on others street crime 
+
+We compare the potential effect of the program on alternative type of crime, to observe if we had a displacement effect on alternative crime. We select street crime, within the property crime classification (without any violence). 
+
+* larceny/theft
+* theft from auto
+* drug dealing
+
+```{r}
+
+# theft
+
+cg_theft1 <- feols(theft_r ~ post + treat + dep_n + post:treat + dep_n:post, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_theft2 <- feols(theft_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_theft3 <- feols(theft_r ~ post + treat + dep_n + post:treat + dep_n:post | department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_theft4 <- feols(theft_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+
+etable(cg_theft1, cg_theft2, cg_theft3, cg_theft4)
+
+file_path <- "../output/tables/simple_theft_reg.tex"
+sink(file_path)
+etable(cg_theft1, cg_theft2, cg_theft3, cg_theft4, tex = T)
+sink()
+
+
+# tfa 
+
+cg_tfa1 <- feols(tfa_r ~ post + treat + dep_n + post:treat + dep_n:post, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_tfa2 <- feols(tfa_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_tfa3 <- feols(tfa_r ~ post + treat + dep_n + post:treat + dep_n:post | department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_tfa4 <- feols(tfa_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+
+etable(cg_tfa1, cg_tfa2, cg_tfa3, cg_tfa4)
+
+file_path <- "../output/tables/theft_from_auto_reg.tex"
+sink(file_path)
+etable(cg_tfa1, cg_tfa2, cg_tfa3, cg_tfa4, tex = T)
+sink()
+
+# dealing 
+
+cg_dealing1 <- feols(dealing_r ~ post + treat + dep_n + post:treat + dep_n:post, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_dealing2 <- feols(dealing_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_dealing3 <- feols(dealing_r ~ post + treat + dep_n + post:treat + dep_n:post | department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+cg_dealing4 <- feols(dealing_r ~ post + treat + dep_n + post:treat + dep_n:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+
+etable(cg_dealing1, cg_dealing2, cg_dealing3, cg_dealing4)
+
+file_path <- "../output/tables/drug_dealing.tex"
+sink(file_path)
+etable(cg_dealing1, cg_dealing2, cg_dealing3, cg_dealing2, tex = T)
+sink()
+
+# We assemble simple theft and street drug dealing in one table 
+
+file_path <- "../output/tables/alternative_crime_model_2_4.tex"
+sink(file_path)
+etable(cg_theft2, cg_theft4, cg_dealing2, cg_dealing2, tex = T)
+sink()
+
+
+```
+
+## Plot of all final regressions with CI95% and CI90%
+
+We implement mostly two types of interesting models: the TWFE, and the augmented TWFE. Certain TWFE models are producing results significant at the 10% level, which is intriguing. Our question is: how powerful those results are. 
+
+```{r}
+
+# Named mapping of models to the term to extract
+coef_map_pp <- c(
+  cg_burglary2      = "post:treat",
+  cg_burglary4      = "post:treat",
+  cg_vehicle_theft2 = "post:treat",
+  cg_vehicle_theft4 = "post:treat",
+  gp_burglary2      = "post:jurisdictiongn",
+  gp_burglary4      = "post:jurisdictiongn",
+  gp_vehicle_theft2 = "post:jurisdictiongn",
+  gp_vehicle_theft4 = "post:jurisdictiongn",
+  cd3_burglary2     = "post:dep_w:jurisdictiongn",
+  cd3_burglary4     = "post:dep_w:jurisdictiongn",
+  cd3_vehicle_theft2 = "post:dep_w:jurisdictiongn",
+  cd3_vehicle_theft4 = "post:dep_w:jurisdictiongn"
+)
+
+models_pp <- list(
+  cg_burglary2      = cg_burglary2,
+  cg_burglary4      = cg_burglary4,
+  cg_vehicle_theft2 = cg_vehicle_theft2,
+  cg_vehicle_theft4 = cg_vehicle_theft4,
+  gp_burglary2      = gp_burglary2,
+  gp_burglary4      = gp_burglary4,
+  gp_vehicle_theft2 = gp_vehicle_theft2,
+  gp_vehicle_theft4 = gp_vehicle_theft4,
+  cd3_burglary2     = cd3_burglary2,
+  cd3_burglary4     = cd3_burglary4,
+  cd3_vehicle_theft2= cd3_vehicle_theft2,
+  cd3_vehicle_theft4= cd3_vehicle_theft4
+)
+# Function to extract stats from a fixest poisson model
+extract_info <- function(model_name, model_obj) {
+
+  alpha_95 <- 0.05
+  alpha_90 <- 0.10
+
+  z_95 <- qnorm(1 - alpha_95 / 2)
+  z_90 <- qnorm(1 - alpha_90 / 2)
+
+  term_of_interest <- coef_map_pp[[model_name]]
+
+  broom::tidy(model_obj) %>%
+    filter(term == term_of_interest) %>%
+    mutate(
+      model = model_name,
+
+      # --- Confidence intervals ---
+      ci95_low = estimate - z_95 * std.error,
+      ci95_high = estimate + z_95 * std.error,
+
+      ci90_low = estimate - z_90 * std.error,
+      ci90_high = estimate + z_90 * std.error
+    ) %>%
+    select(
+      model, term, estimate, std.error,
+      ci90_low, ci90_high,
+      ci95_low, ci95_high
+    )
+}
+
+# Build full table
+results_table_pp <- map2_df(
+  names(models_pp),
+  models_pp,
+  extract_info
+)
+
+results_table_pp
+
+model_order <- c(
+  "cg_burglary2",
+  "cg_burglary4",
+  "cg_vehicle_theft2",
+  "cg_vehicle_theft4",
+  "gp_burglary2",
+  "gp_burglary4",
+  "gp_vehicle_theft2",
+  "gp_vehicle_theft4",
+  "cd3_burglary2",
+  "cd3_burglary4",
+  "cd3_vehicle_theft2",
+  "cd3_vehicle_theft4"
+  )
+
+
+# right names for models
+
+model_labels <- c(
+  cg_burglary2        = "Gendarmerie counterfactual – Burglary (TWFE)",
+  cg_burglary4        = "Gendarmerie counterfactual – Burglary (ATWFE)",
+  cg_vehicle_theft2  = "Gendarmerie counterfactual – Vehicle theft (TWFE)",
+  cg_vehicle_theft4  = "Gendarmerie counterfactual – Vehicle theft (ATWFE)",
+  gp_burglary2       = "Police counterfactual – Burglary (TWFE)",
+  gp_burglary4       = "Police counterfactual – Burglary (ATWFE)",
+  gp_vehicle_theft2  = "Police counterfactual – Vehicle theft (TWFE)",
+  gp_vehicle_theft4  = "Police counterfactual – Vehicle theft (ATWFE)",
+  cd3_burglary2      = "DiDiD – Burglary (TWFE)",
+  cd3_burglary4      = "DiDiD – Burglary (ATWFE)",
+  cd3_vehicle_theft2 = "DiDiD – Vehicle theft (TWFE)",
+  cd3_vehicle_theft4 = "DiDiD – Vehicle theft (ATWFE)"
+)
+
+results_table_pp <- results_table_pp %>%
+  mutate(
+    model = factor(
+      model,
+      levels = model_order,
+      labels = model_labels[model_order]
+    )
+  )
+
+
+# plot
+
+ggplot(results_table_pp,
+       aes(y = as.factor(model), x = estimate)) +
+
+  # --- 95% CI (thin) ---
+  geom_errorbarh(
+    aes(xmin = ci95_low, xmax = ci95_high),
+    height = 0.15,
+    linewidth = 0.8
+  ) +
+
+  # --- 90% CI (thick) ---
+  geom_errorbarh(
+    aes(xmin = ci90_low, xmax = ci90_high),
+    height = 0.25,
+    linewidth = 1.5
+  ) +
+
+  # --- Point estimate ---
+  geom_point(size = 2.8) +
+
+  # --- Zero line ---
+  geom_vline(xintercept = 0, linetype = "dashed") +
+
+  labs(
+    x = "Effect size",
+    y = NULL,
+    title = "Estimated post-treatment effects and detectability",
+    subtitle = "Points: estimates • Thick bars: 90% CI • Thin bars: 95% CI"
+  ) +
+   scale_y_discrete(limits = rev) + 
+
+  theme_minimal(base_size = 13)
+
+ggsave("../output/recap_model4.pdf", width = 3600, height = 2400, units = "px")
+
+# 
+
+
+
+```
+
+## Placebo and randomization 
+
+```{r}
+
+
+# Candidate placebo dates (monthly)
+placebo_dates <- seq(
+  as.Date("2015-02-01"),
+  as.Date("2018-11-01"),
+  by = "month"
+)
+
+true_treat_date <- as.Date("2017-10-01")
+
+# gendarmerie 
+
+run_placebo_did_burglary <- function(df, placebo_date) {
+  
+  df <- df %>%
+    mutate(post_placebo = as.integer(date >= placebo_date))
+  
+  m_burglary <- feols(
+    burglary_r ~ post_placebo + treat + dep_n + post_placebo:treat + dep_n:post_placebo |
+      jurisdiction_department + date + department_month,
+    data = df,
+    cluster = "jurisdiction_department"
+  )
+  
+  coef(m_burglary)["post_placebo:treat"]
+}
+
+run_placebo_did_vehicle_theft <- function(df, placebo_date) {
+  
+  df <- df %>%
+    mutate(post_placebo = as.integer(date >= placebo_date))
+  
+  m_vehicle_theft <- feols(
+    vehicle_theft_r ~ post_placebo + treat + dep_n + post_placebo:treat + dep_n:post_placebo |
+      jurisdiction_department + date + department_month,
+    data = df,
+    cluster = "jurisdiction_department"
+  )
+  
+  coef(m_vehicle_theft)["post_placebo:treat"]
+}
+
+# police
+
+run_placebo_did_police_burglary <- function(df, placebo_date) {
+  
+  df <- df %>%
+    mutate(post_placebo = as.integer(date >= placebo_date))
+  
+  m_burglary <- feols(
+    burglary_r ~ post_placebo + jurisdiction + post_placebo:jurisdiction |
+      jurisdiction_department + date + department_month,
+    data = df,
+    cluster = "jurisdiction_department"
+  )
+  
+  coef(m_burglary)["post_placebo:jurisdictiongn"]
+}
+
+#
+
+run_placebo_did_police_vehicle_theft <- function(df, placebo_date) {
+  
+  df <- df %>%
+    mutate(post_placebo = as.integer(date >= placebo_date))
+  
+  m_vehicle_theft <- feols(
+    vehicle_theft_r ~ post_placebo + jurisdiction + post_placebo:jurisdiction |
+      jurisdiction_department + date + department_month,
+    data = df,
+    cluster = "jurisdiction_department"
+  )
+  
+  coef(m_vehicle_theft)["post_placebo:jurisdictiongn"]
+}
+
+# didid
+
+run_placebo_didid_burglary <- function(df, placebo_date) {
+  
+  df <- df %>%
+    mutate(post_placebo = as.integer(date >= placebo_date))
+  
+  m_burglary <- feols(
+    burglary_r ~ post_placebo*dep_w*jurisdiction + post_placebo*dep_n | jurisdiction_department + date + department_month,
+    data = df,
+    cluster = "jurisdiction_department"
+  )
+  
+  coef(m_burglary)["post_placebo:dep_w:jurisdictiongn"]
+}
+
+
+run_placebo_didid_vehicle_theft <- function(df, placebo_date) {
+  
+  df <- df %>%
+    mutate(post_placebo = as.integer(date >= placebo_date))
+  
+  m_vehicle_theft <- feols(
+    vehicle_theft_r ~ post_placebo*dep_w*jurisdiction + post_placebo*dep_n | jurisdiction_department + date + department_month,
+    data = df,
+    cluster = "jurisdiction_department"
+  )
+  
+  coef(m_vehicle_theft)["post_placebo:dep_w:jurisdictiongn"]
+}
+
+
+# Run the regression using the functions : gendarmerie
+
+placebo_coefs_burglary_cg <- sapply(placebo_dates, function(d) {
+  run_placebo_did_burglary(df_gendarmerie, d)
+})
+
+
+placebo_coefs_vehicle_theft_cg <- sapply(placebo_dates, function(d) {
+  run_placebo_did_vehicle_theft(df_gendarmerie, d)
+})
+
+
+placebo_df_burglary_cg <- data.frame(
+  placebo_date = placebo_dates,
+  coef = placebo_coefs_burglary_cg
+)
+
+
+placebo_df_vehicle_theft_cg <- data.frame(
+  placebo_date = placebo_dates,
+  coef = placebo_coefs_vehicle_theft_cg
+)
+
+# Run the regression using the functions : police
+
+placebo_coefs_burglary_cp <- sapply(placebo_dates, function(d) {
+  run_placebo_did_police_burglary(df_gendarmerie_police, d)
+})
+
+
+placebo_coefs_vehicle_theft_cp <- sapply(placebo_dates, function(d) {
+  run_placebo_did_police_vehicle_theft(df_gendarmerie_police, d)
+})
+
+
+placebo_df_burglary_cp <- data.frame(
+  placebo_date = placebo_dates,
+  coef = placebo_coefs_burglary_cp
+)
+
+
+placebo_df_vehicle_theft_cp <- data.frame(
+  placebo_date = placebo_dates,
+  coef = placebo_coefs_vehicle_theft_cp
+)
+
+# Run the regression using the functions : didid
+
+placebo_coefs_burglary_3d <- sapply(placebo_dates, function(d) {
+  run_placebo_didid_burglary(df_didid, d)
+})
+
+
+placebo_coefs_vehicle_theft_3d <- sapply(placebo_dates, function(d) {
+  run_placebo_didid_vehicle_theft(df_didid, d)
+})
+
+
+placebo_df_burglary_3d <- data.frame(
+  placebo_date = placebo_dates,
+  coef = placebo_coefs_burglary_3d
+)
+
+
+placebo_df_vehicle_theft_3d <- data.frame(
+  placebo_date = placebo_dates,
+  coef = placebo_coefs_vehicle_theft_3d
+)
+
+
+
+# True coeff for plots 
+
+true_coeff_burglary_cg <- coef(cg_burglary2)["post:treat"]
+true_coeff_vehicle_theft_cg <- coef(cg_vehicle_theft2)["post:treat"]
+
+true_coeff_burglary_cp <- coef(gp_burglary2)["post:jurisdictiongn"]
+true_coeff_vehicle_theft_cp <- coef(gp_vehicle_theft2)["post:jurisdictiongn"]
+
+true_coeff_burglary_3d <- coef(cd3_burglary2)["post:dep_w:jurisdictiongn"]
+true_coeff_vehicle_theft_3d <- coef(cd3_vehicle_theft4)["post:dep_w:jurisdictiongn"]
+
+
+# Plot: gendarmerie counterfactual
+
+ggplot(placebo_df_burglary_cg, aes(x = abs(coef))) +
+  geom_histogram(bins = 30, fill = "grey80", color = "black") +
+  geom_vline(xintercept = abs(true_coeff_burglary_cg), color = "red", linewidth = 1.2) +
+  labs(
+    title = "Placebo DiD test (randomized treatment timing, gendarmerie counterfactual) - Burglary rate",
+    subtitle = "Red line = true treatment effect",
+    x = "Placebo DiD coefficient",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+ggsave("../output/placebo_counterfactual_gendarmerie_burglary_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+
+ggplot(placebo_df_vehicle_theft_cg, aes(x = abs(coef))) +
+  geom_histogram(bins = 30, fill = "grey80", color = "black") +
+  geom_vline(xintercept = abs(true_coeff_vehicle_theft_cg), color = "red", linewidth = 1.2) +
+  labs(
+    title = "Placebo DiD test (randomized treatment timing, gendarmerie counterfactual) - Vehicle theft rate",
+    subtitle = "Red line = true treatment effect",
+    x = "Placebo DiD coefficient",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+ggsave("../output/placebo_counterfactual_gendarmerie_vehicle_theft_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+# Plot: police counterfactual
+
+ggplot(placebo_df_burglary_cp, aes(x = abs(coef))) +
+  geom_histogram(bins = 30, fill = "grey80", color = "black") +
+  geom_vline(xintercept = abs(true_coeff_burglary_cp), color = "red", linewidth = 1.2) +
+  labs(
+    title = "Placebo DiD test (randomized treatment timing, police counterfactual) - Burglary rate",
+    subtitle = "Red line = true treatment effect",
+    x = "Placebo DiD coefficient",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+ggsave("../output/placebo_counterfactual_police_burglary_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+
+ggplot(placebo_df_vehicle_theft_cp, aes(x = abs(coef))) +
+  geom_histogram(bins = 30, fill = "grey80", color = "black") +
+  geom_vline(xintercept = abs(true_coeff_vehicle_theft_cp), color = "red", linewidth = 1.2) +
+  labs(
+    title = "Placebo DiD test (randomized treatment timing, police counterfactual) - Vehicle theft rate",
+    subtitle = "Red line = true treatment effect",
+    x = "Placebo DiD coefficient",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+ggsave("../output/placebo_counterfactual_police_vehicle_theft_r.pdf", width = 2700, height = 1800, units = "px")
+
+# Plot: didid counterfactual
+
+ggplot(placebo_df_burglary_3d, aes(x = abs(coef))) +
+  geom_histogram(bins = 30, fill = "grey80", color = "black") +
+  geom_vline(xintercept = abs(true_coeff_burglary_3d), color = "red", linewidth = 1.2) +
+  labs(
+    title = "Placebo DiDiD test (randomized treatment timing) - Burglary rate",
+    subtitle = "Red line = true treatment effect",
+    x = "Placebo DiDiD coefficient",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+ggsave("../output/placebo_counterfactual_3d_burglary_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+
+ggplot(placebo_df_vehicle_theft_3d, aes(x = abs(coef))) +
+  geom_histogram(bins = 30, fill = "grey80", color = "black") +
+  geom_vline(xintercept = abs(true_coeff_vehicle_theft_3d), color = "red", linewidth = 1.2) +
+  labs(
+    title = "Placebo DiDiD test (randomized treatment timing) - Vehicle theft rate",
+    subtitle = "Red line = true treatment effect",
+    x = "Placebo DiDiD coefficient",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+ggsave("../output/placebo_counterfactual_3d_vehicle_theft_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+# Distribution of average effect 
+
+
+mean(abs(placebo_df_burglary_cg$coef) >= abs(true_coeff_burglary_cg))
+mean(abs(placebo_df_vehicle_theft_cg$coef) >= abs(true_coeff_vehicle_theft_cg))
+
+mean(abs(placebo_df_burglary_cp$coef) >= abs(true_coeff_burglary_cp))
+mean(abs(placebo_df_vehicle_theft_cp$coef) >= abs(true_coeff_vehicle_theft_cp))
+
+
+mean(abs(placebo_df_burglary_3d$coef) >= abs(true_coeff_burglary_3d))
+mean(abs(placebo_df_vehicle_theft_3d$coef) >= abs(true_coeff_vehicle_theft_3d))
+
+
+
+```
+
+## Short and long term effect
+
+The treatment period is divided in 3 
+
+```{r}
+
+df_didid$jurisdiction <- as.factor(df_didid$jurisdiction)
+df_didid$jurisdiction <- relevel(df_didid$jurisdiction, "pn")
+
+df_gendarmerie_police$jurisdiction <- as.factor(df_gendarmerie_police$jurisdiction)
+
+df_gendarmerie_police$jurisdiction <- relevel(df_gendarmerie_police$jurisdiction, "pn")
+
+cg_burglary4_slterm <- feols(burglary_r ~ post_1_3 + treat + dep_n + post_1_3:treat + post_1_3:post | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+
+cg_vehicle_theft4_slterm <- feols(vehicle_theft_r ~ post_1_3 + treat + dep_n + post_1_3:treat + dep_n:post_1_3 | jurisdiction_department + date + department_month, df_gendarmerie, cluster = 'jurisdiction_department')
+
+gp_burglary4_slterm <- feols(burglary_r ~ post_1_3 + jurisdiction + post_1_3:jurisdiction | jurisdiction_department + date + department_month, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+gp_vehicle_theft4_slterm <- feols(vehicle_theft_r ~ post_1_3 + jurisdiction + post_1_3:jurisdiction | jurisdiction_department + date + department_month, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+cd3_burglary4_slterm <- feols(burglary_r ~ post_1_3*dep_w*jurisdiction + post_1_3*dep_n | jurisdiction_department + date + department_month, df_didid, cluster = 'jurisdiction_department')
+
+cd3_vehicle_theft4_slterm <- feols(vehicle_theft_r ~ post_1_3*dep_w*jurisdiction + post_1_3*dep_n | jurisdiction_department + date + department_month, df_didid, cluster = 'jurisdiction_department')
+
+etable(cg_burglary4_slterm, cg_vehicle_theft4_slterm, gp_burglary4_slterm, gp_vehicle_theft4_slterm, cd3_burglary4_slterm, cd3_vehicle_theft4_slterm)
+
+file_path <- "../output/tables/short_long_term_effects.tex"
+sink(file_path)
+etable(cg_burglary4_slterm, cg_vehicle_theft4_slterm, gp_burglary4_slterm, gp_vehicle_theft4_slterm, cd3_burglary4_slterm, cd3_vehicle_theft4_slterm, tex = T)
+sink()
+
+
+```
+
+## Long term plots 
+
+```{r}
+
+# Gendarmerie counterfactual 
+
+ggplot(df_gendarmerie_plot, aes(y = burglary_r, x = date, color = factor(treat), group = factor(treat))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Treatment group", y = "Burglary rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3','forestgreen'), labels=c("Control", "Treatment")) +
+  scale_y_continuous()
+
+ggsave("../output/long_term_counterfactual_gendarmerie_burglary_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+ggplot(df_gendarmerie_plot, aes(y = vehicle_theft_r, x = date, color = factor(dep_w), group = factor(dep_w))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Treatment group", y = "Vehicle theft rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3','forestgreen'), labels=c("Control", "Treatment")) +
+  scale_y_continuous()
+
+ggsave("../output/long_term_counterfactual_gendarmerie_vehicle_theft_r.pdf", width = 2700, height = 1800, units = "px")
+
+# Police counterfactual 
+
+ggplot(df_gendarmerie_police_plot, aes(y = burglary_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Treatment group", y = "Burglary rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3', 'forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous()
+
+ggsave("../output/long_term_counterfactual_police_burglary_r.pdf", width = 2700, height = 1800, units = "px")
+
+
+ggplot(df_gendarmerie_police_plot, aes(y = vehicle_theft_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Treatment group", y = "Vehicle theft rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3','forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous()
+
+ggsave("../output/long_term_counterfactual_police_vehicle_theft_r.pdf", width = 2700, height = 1800, units = "px")
+
+## DiDiD
+
+
+df_didid_plot$dep_w_plot <- ifelse(df_didid_plot$dep_w == 1, "Treatment", "Control")
+
+ggplot(df_didid_plot, aes(y = burglary_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Treatment group", y = "Burglary rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3', 'forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous() + 
+  facet_wrap(~ dep_w_plot, ncol = 1)
+
+ggsave("../output/long_term_counterfactual_didid_burglary_r.pdf", width = 2700, height = 2700, units = "px")
+
+####
+
+ggplot(df_didid_plot, aes(y = vehicle_theft_r, x = date, color = factor(jurisdiction), group = factor(jurisdiction))) + 
+  stat_summary(fun = "mean", geom = "line") +
+  geom_vline(xintercept = as.numeric(as.Date("2017-10-01"))) +
+  scale_x_date(date_breaks = "6 month", date_labels =  "%b %Y") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.position = "bottom", text = element_text(size = 16)) + 
+  labs(colour = "Treatment group", y = "Vehicle theft rate (per 10000)", x = NULL) + 
+  scale_color_manual(values=c('red3', 'forestgreen'), labels = c("Police", "Gendarmerie")) +
+  scale_y_continuous() + 
+  facet_wrap(~ dep_w_plot, ncol = 1)
+
+ggsave("../output/long_term_counterfactual_didid_vehicle_theft_r.pdf", width = 2700, height = 2700, units = "px")
+
+
+
+
+```
+
+## Honest DiD approach 
+
+Run in parallel 
+
+```{r}
+library(doParallel)
+registerDoParallel(cores = 10)
+
+```
+
+
+Burglary
+
+```{r}
+
+# Baseline model, event study 
+
+cg_burglary1_es <- feols(
+  burglary_r ~  i(date, treat, ref = as.Date("2017-09-01")) | date + jurisdiction_department,
+  data = subset(df_gendarmerie, dep_n == 0),
+  cluster = ~ jurisdiction_department
+)
+
+gp_burglary1_es <- feols(burglary_r ~ i(date, jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+d3_burglary1_es <- feols(burglary_r ~ i(date, dep_w*jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_didid, cluster = 'jurisdiction_department')
+
+
+# Save coefficients
+betahat_cg_burglary1_es <- summary(cg_burglary1_es)$coefficients
+betahat_gp_burglary1_es <- summary(gp_burglary1_es)$coefficients
+betahat_d3_burglary1_es <- summary(d3_burglary1_es)$coefficients
+
+# Save the covariance matrix
+sigma_cg_burglary1_es <- summary(cg_burglary1_es)$cov.scaled
+sigma_gp_burglary1_es <- summary(gp_burglary1_es)$cov.scaled
+sigma_d3_burglary1_es <- summary(d3_burglary1_es)$cov.scaled
+
+#
+
+delta_rm_results_cg_burglary1_es <- createSensitivityResults_relativeMagnitudes(
+    betahat = betahat_cg_burglary1_es, #coefficients
+    sigma = sigma_cg_burglary1_es, #covariance matrix
+    numPrePeriods = 32, #num. of pre-treatment coefs
+    numPostPeriods = 15, #num. of post-treatment coefs
+    Mbarvec = seq(0.5,2,by=0.5), #values of Mbar
+    parallel = TRUE
+  )
+
+delta_rm_results_gp_burglary1_es <- createSensitivityResults_relativeMagnitudes(
+    betahat = betahat_gp_burglary1_es, #coefficients
+    sigma = sigma_gp_burglary1_es, #covariance matrix
+    numPrePeriods = 32, #num. of pre-treatment coefs
+    numPostPeriods = 15, #num. of post-treatment coefs
+    Mbarvec = seq(0.5,2,by=0.5), #values of Mbar
+    parallel = TRUE 
+  )
+
+
+delta_rm_results_d3_burglary1_es <- createSensitivityResults_relativeMagnitudes(
+    betahat = betahat_d3_burglary1_es, #coefficients
+    sigma = sigma_d3_burglary1_es, #covariance matrix
+    numPrePeriods = 32, #num. of pre-treatment coefs
+    numPostPeriods = 15, #num. of post-treatment coefs
+    Mbarvec = seq(0.5,2,by=0.5), #values of Mbar
+    parallel = TRUE
+  )
+
+
+delta_rm_results_cg_burglary1_es
+delta_rm_results_gp_burglary1_es
+delta_rm_results_d3_burglary1_es
+
+# center the CI on the ATT for readability
+
+delta_rm_results_cg_burglary1_es_corrected <- delta_rm_results_cg_burglary1_es %>%
+  rowwise() %>%
+  mutate(
+    mid = (lb + ub) / 2,
+    lb  = lb - mid + coef(cg_burglary2)["post:treat"],
+    ub  = ub - mid + coef(cg_burglary2)["post:treat"]
+  ) %>%
+  ungroup() %>%
+  select(-mid)
+
+delta_rm_results_gp_burglary1_es_corrected <- delta_rm_results_gp_burglary1_es %>%
+  rowwise() %>%
+  mutate(
+    mid = (lb + ub) / 2,
+    lb  = lb - mid + coef(gp_burglary2)["post:jurisdictiongn"],
+    ub  = ub - mid + coef(gp_burglary2)["post:jurisdictiongn"]
+  ) %>%
+  ungroup() %>%
+  select(-mid)
+
+delta_rm_results_d3_burglary1_es_corrected <- delta_rm_results_d3_burglary1_es %>%
+  rowwise() %>%
+  mutate(
+    mid = (lb + ub) / 2,
+    lb  = lb - mid + coef(cd3_burglary2)["post:dep_w:jurisdictiongn"],
+    ub  = ub - mid + coef(cd3_burglary2)["post:dep_w:jurisdictiongn"]
+  ) %>%
+  ungroup() %>%
+  select(-mid)
+
+# Plot
+
+originalResults_cg_burglary1_es <- tibble(
+  lb     = coef(cg_burglary2)["post:treat"] - se(cg_burglary2)["post:treat"]*1.96,
+  ub     = coef(cg_burglary2)["post:treat"] + se(cg_burglary2)["post:treat"]*1.96,
+  method = "Original",
+  Delta  = NA
+)
+
+originalResults_gp_burglary1_es <- tibble(
+  lb     = coef(gp_burglary2)["post:jurisdictiongn"] - se(gp_burglary2)["post:jurisdictiongn"]*1.96,
+  ub     = coef(gp_burglary2)["post:jurisdictiongn"] + se(gp_burglary2)["post:jurisdictiongn"]*1.96,
+  method = "Original",
+  Delta  = NA
+)
+
+originalResults_d3_burglary1_es <- tibble(
+  lb     = coef(cd3_burglary2)["post:dep_w:jurisdictiongn"] - se(cd3_burglary2)["post:dep_w:jurisdictiongn"]*1.96,
+  ub     = coef(cd3_burglary2)["post:dep_w:jurisdictiongn"] + se(cd3_burglary2)["post:dep_w:jurisdictiongn"]*1.96,
+  method = "Original",
+  Delta  = NA
+)
+
+#
+
+pdf("../output/honest_did_cg_burglary.pdf")
+createSensitivityPlot_relativeMagnitudes(delta_rm_results_cg_burglary1_es_corrected, originalResults_cg_burglary1_es)
+dev.off()
+
+pdf("../output/honest_did_cp_burglary.pdf")
+createSensitivityPlot_relativeMagnitudes(delta_rm_results_cg_burglary1_es_corrected, originalResults_gp_burglary1_es)
+dev.off()
+
+pdf("../output/honest_did_3d_burglary.pdf")
+createSensitivityPlot_relativeMagnitudes(delta_rm_results_d3_burglary1_es_corrected, originalResults_d3_burglary1_es)
+dev.off()
+
+```
+
+Vehicle theft
+
+```{r}
+
+library(HonestDiD)
+
+# Baseline model, event study 
+
+cg_vehicle_theft1_es <- feols(
+  vehicle_theft_r ~  i(date, treat, ref = as.Date("2017-09-01")) | date + jurisdiction_department,
+  data = subset(df_gendarmerie, dep_n == 0),
+  cluster = ~ jurisdiction_department
+)
+
+gp_vehicle_theft1_es <- feols(vehicle_theft_r ~ i(date, jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_gendarmerie_police, cluster = 'jurisdiction_department')
+
+d3_vehicle_theft1_es <- feols(vehicle_theft_r ~ i(date, dep_w*jurisdiction_gn, ref = as.Date("2017-09-01")) | jurisdiction_department + date, df_didid, cluster = 'jurisdiction_department')
+
+
+# Save coefficients
+betahat_cg_vehicle_theft1_es <- summary(cg_vehicle_theft1_es)$coefficients
+betahat_gp_vehicle_theft1_es <- summary(gp_vehicle_theft1_es)$coefficients
+betahat_d3_vehicle_theft1_es <- summary(d3_vehicle_theft1_es)$coefficients
+
+# Save the covariance matrix
+sigma_cg_vehicle_theft1_es <- summary(cg_vehicle_theft1_es)$cov.scaled
+sigma_gp_vehicle_theft1_es <- summary(gp_vehicle_theft1_es)$cov.scaled
+sigma_d3_vehicle_theft1_es <- summary(d3_vehicle_theft1_es)$cov.scaled
+
+#
+
+delta_rm_results_cg_vehicle_theft1_es <- createSensitivityResults_relativeMagnitudes(
+    betahat = betahat_cg_vehicle_theft1_es, #coefficients
+    sigma = sigma_cg_vehicle_theft1_es, #covariance matrix
+    numPrePeriods = 32, #num. of pre-treatment coefs
+    numPostPeriods = 15, #num. of post-treatment coefs
+    Mbarvec = seq(0.5,2,by=0.5), #values of Mbar
+    parallel = TRUE
+  )
+
+delta_rm_results_gp_vehicle_theft1_es <- createSensitivityResults_relativeMagnitudes(
+    betahat = betahat_gp_vehicle_theft1_es, #coefficients
+    sigma = sigma_gp_vehicle_theft1_es, #covariance matrix
+    numPrePeriods = 32, #num. of pre-treatment coefs
+    numPostPeriods = 15, #num. of post-treatment coefs
+    Mbarvec = seq(0.5,2,by=0.5), #values of Mbar
+    parallel = TRUE
+  )
+
+
+delta_rm_results_d3_vehicle_theft1_es <- createSensitivityResults_relativeMagnitudes(
+    betahat = betahat_d3_vehicle_theft1_es, #coefficients
+    sigma = sigma_d3_vehicle_theft1_es, #covariance matrix
+    numPrePeriods = 32, #num. of pre-treatment coefs
+    numPostPeriods = 15, #num. of post-treatment coefs
+    Mbarvec = seq(0.5,2,by=0.5), #values of Mbar
+    parallel = TRUE
+  )
+
+
+delta_rm_results_cg_vehicle_theft1_es
+delta_rm_results_gp_vehicle_theft1_es
+delta_rm_results_d3_vehicle_theft1_es
+
+# correct the centering
+
+delta_rm_results_cg_vehicle_theft1_es_corrected <- delta_rm_results_cg_vehicle_theft1_es %>%
+  rowwise() %>%
+  mutate(
+    mid = (lb + ub) / 2,
+    lb  = lb - mid + coef(cg_vehicle_theft2)["post:treat"],
+    ub  = ub - mid + coef(cg_vehicle_theft2)["post:treat"]
+  ) %>%
+  ungroup() %>%
+  select(-mid)
+
+delta_rm_results_gp_vehicle_theft1_es_corrected <- delta_rm_results_gp_vehicle_theft1_es %>%
+  rowwise() %>%
+  mutate(
+    mid = (lb + ub) / 2,
+    lb  = lb - mid + coef(gp_vehicle_theft2)["post:jurisdictiongn"],
+    ub  = ub - mid + coef(gp_vehicle_theft2)["post:jurisdictiongn"]
+  ) %>%
+  ungroup() %>%
+  select(-mid)
+
+
+delta_rm_results_d3_vehicle_theft1_es_corrected <- delta_rm_results_d3_vehicle_theft1_es %>%
+  rowwise() %>%
+  mutate(
+    mid = (lb + ub) / 2,
+    lb  = lb - mid + coef(cd3_vehicle_theft2)["post:dep_w:jurisdictiongn"],
+    ub  = ub - mid + coef(cd3_vehicle_theft2)["post:dep_w:jurisdictiongn"]
+  ) %>%
+  ungroup() %>%
+  select(-mid)
+
+# Plot
+
+
+originalResults_cg_vehicle_theft1_es <- tibble(
+  lb     = coef(cg_vehicle_theft2)["post:treat"] - se(cg_vehicle_theft2)["post:treat"]*1.96,
+  ub     = coef(cg_vehicle_theft2)["post:treat"] + se(cg_vehicle_theft2)["post:treat"]*1.96,
+  method = "Original",
+  Delta  = NA
+)
+
+originalResults_gp_vehicle_theft1_es <- tibble(
+  lb     = coef(gp_vehicle_theft2)["post:jurisdictiongn"] - se(gp_vehicle_theft2)["post:jurisdictiongn"]*1.96,
+  ub     = coef(gp_vehicle_theft2)["post:jurisdictiongn"] + se(gp_vehicle_theft2)["post:jurisdictiongn"]*1.96,
+  method = "Original",
+  Delta  = NA
+)
+
+originalResults_d3_vehicle_theft1_es <- tibble(
+  lb     = coef(cd3_vehicle_theft2)["post:dep_w:jurisdictiongn"] - se(cd3_vehicle_theft2)["post:dep_w:jurisdictiongn"]*1.96,
+  ub     = coef(cd3_vehicle_theft2)["post:dep_w:jurisdictiongn"] + se(cd3_vehicle_theft2)["post:dep_w:jurisdictiongn"]*1.96,
+  method = "Original",
+  Delta  = NA
+)
+
+# assign the original standard error
+
+pdf("../output/honest_did_cg_vehicle_theft.pdf")
+createSensitivityPlot_relativeMagnitudes(delta_rm_results_cg_vehicle_theft1_es_corrected, originalResults_cg_vehicle_theft1_es)
+dev.off()
+
+pdf("../output/honest_did_cp_vehicle_theft.pdf")
+createSensitivityPlot_relativeMagnitudes(delta_rm_results_gp_vehicle_theft1_es_corrected, originalResults_gp_vehicle_theft1_es)
+dev.off()
+
+pdf("../output/honest_did_3d_vehicle_theft.pdf")
+createSensitivityPlot_relativeMagnitudes(delta_rm_results_d3_vehicle_theft1_es_corrected, originalResults_d3_vehicle_theft1_es)
+dev.off()
+
+
+```
+
+# Session info 
+
+```{r}
+
+sessionInfo()
+
+```
+
+
+
+
+
+
+
+
+

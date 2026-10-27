@@ -1,0 +1,35 @@
+\begingroup
+\centering
+\begin{tabular}{lcccc}
+   \tabularnewline \midrule \midrule
+   Dependent Variable: & \multicolumn{4}{c}{vehicle\_theft\_r}\\
+   Model:                    & (1)             & (2)           & (3)             & (4)\\  
+   \midrule
+   \emph{Variables}\\
+   Constant                  & 1.102$^{***}$   &               &                 &   \\   
+                             & (0.0880)        &               &                 &   \\   
+   post                      & -0.1262$^{***}$ &               & -0.1239$^{***}$ &   \\   
+                             & (0.0419)        &               & (0.0443)        &   \\   
+   treat                     & 0.7718$^{***}$  &               &                 &   \\   
+                             & (0.2537)        &               &                 &   \\   
+   dep\_n                    & 0.1600          &               &                 &   \\   
+                             & (0.1522)        &               &                 &   \\   
+   post $\times$ treat       & -0.1450$^{*}$   & -0.1450$^{*}$ & -0.1575$^{*}$   & -0.1575\\   
+                             & (0.0818)        & (0.0822)      & (0.0859)        & (0.0999)\\   
+   post $\times$ dep\_n      & -0.0046         & -0.0046       & -0.0118         & -0.0118\\   
+                             & (0.0495)        & (0.0497)      & (0.0522)        & (0.0607)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   jurisdiction\_department  &                 & Yes           &                 & Yes\\  
+   date                      &                 & Yes           &                 & Yes\\  
+   department\_month         &                 &               & Yes             & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations              & 4,416           & 4,416         & 4,416           & 4,416\\  
+   R$^2$                     & 0.09458         & 0.81624       & 0.86506         & 0.86931\\  
+   Within R$^2$              &                 & 0.00429       & 0.05878         & 0.00650\\  
+   \midrule \midrule
+   \multicolumn{5}{l}{\emph{Clustered (jurisdiction\_department) standard-errors in parentheses}}\\
+   \multicolumn{5}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup

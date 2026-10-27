@@ -1,0 +1,35 @@
+\begingroup
+\centering
+\begin{tabular}{lcccc}
+   \tabularnewline \midrule \midrule
+   Dependent Variable: & \multicolumn{4}{c}{burglary\_r}\\
+   Model:                    & (1)            & (2)          & (3)      & (4)\\  
+   \midrule
+   \emph{Variables}\\
+   Constant                  & 2.146$^{***}$  &              &          &   \\   
+                             & (0.0924)       &              &          &   \\   
+   post                      & 0.0257         &              & -0.0753  &   \\   
+                             & (0.0518)       &              & (0.0523) &   \\   
+   treat                     & 0.8643$^{***}$ &              &          &   \\   
+                             & (0.2699)       &              &          &   \\   
+   dep\_n                    & 0.2981$^{*}$   &              &          &   \\   
+                             & (0.1633)       &              &          &   \\   
+   post $\times$ treat       & 0.2576$^{*}$   & 0.2576$^{*}$ & 0.2117   & 0.2117\\   
+                             & (0.1508)       & (0.1516)     & (0.1649) & (0.1918)\\   
+   post $\times$ dep\_n      & 0.0671         & 0.0671       & 0.0240   & 0.0240\\   
+                             & (0.0853)       & (0.0858)     & (0.0824) & (0.0958)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   jurisdiction\_department  &                & Yes          &          & Yes\\  
+   date                      &                & Yes          &          & Yes\\  
+   department\_month         &                &              & Yes      & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations              & 4,416          & 4,416        & 4,416    & 4,416\\  
+   R$^2$                     & 0.07562        & 0.61353      & 0.73325  & 0.75630\\  
+   Within R$^2$              &                & 0.00291      & 0.00373  & 0.00298\\  
+   \midrule \midrule
+   \multicolumn{5}{l}{\emph{Clustered (jurisdiction\_department) standard-errors in parentheses}}\\
+   \multicolumn{5}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup

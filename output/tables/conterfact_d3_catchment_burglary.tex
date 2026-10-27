@@ -1,0 +1,43 @@
+\begingroup
+\centering
+\begin{tabular}{lcccc}
+   \tabularnewline \midrule \midrule
+   Dependent Variable: & \multicolumn{4}{c}{burglary\_r}\\
+   Model:                                          & (1)             & (2)      & (3)             & (4)\\  
+   \midrule
+   \emph{Variables}\\
+   Constant                                        & 2.906$^{***}$   &          &                 &   \\   
+                                                   & (0.1427)        &          &                 &   \\   
+   post                                            & 0.0134          &          & -0.0849         &   \\   
+                                                   & (0.0717)        &          & (0.0776)        &   \\   
+   dep\_w                                          & 1.526$^{**}$    &          &                 &   \\   
+                                                   & (0.5906)        &          &                 &   \\   
+   jurisdictiongn                                  & -0.9038$^{***}$ &          & -0.9038$^{***}$ &   \\   
+                                                   & (0.1801)        &          & (0.0969)        &   \\   
+   dep\_n                                          & 0.6040$^{***}$  &          &                 &   \\   
+                                                   & (0.1859)        &          &                 &   \\   
+   post $\times$ dep\_w                            & -0.2516         & -0.2516  & -0.3006         & -0.3006\\   
+                                                   & (0.2631)        & (0.2638) & (0.2902)        & (0.2910)\\   
+   post $\times$ jurisdictiongn                    & 0.0513          & 0.0513   & 0.0513          & 0.0513\\   
+                                                   & (0.0822)        & (0.0824) & (0.0853)        & (0.0855)\\   
+   dep\_w $\times$ jurisdictiongn                  & -0.5178         &          & -0.5178         &   \\   
+                                                   & (0.6518)        &          & (0.3687)        &   \\   
+   post $\times$ dep\_n                            & -0.0158         & -0.0158  & -0.0463         & -0.0463\\   
+                                                   & (0.0837)        & (0.0839) & (0.0897)        & (0.0900)\\   
+   post $\times$ dep\_w $\times$ jurisdictiongn    & 0.4704          & 0.4704   & 0.4704          & 0.4704\\   
+                                                   & (0.3014)        & (0.3021) & (0.3250)        & (0.3259)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   jurisdiction\_department                        &                 & Yes      &                 & Yes\\  
+   date                                            &                 & Yes      &                 & Yes\\  
+   department\_month                               &                 &          & Yes             & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations                                    & 8,832           & 8,832    & 8,832           & 8,832\\  
+   R$^2$                                           & 0.15317         & 0.69557  & 0.61942         & 0.75360\\  
+   Within R$^2$                                    &                 & 0.00235  & 0.18310         & 0.00309\\  
+   \midrule \midrule
+   \multicolumn{5}{l}{\emph{Clustered (jurisdiction\_department) standard-errors in parentheses}}\\
+   \multicolumn{5}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup
